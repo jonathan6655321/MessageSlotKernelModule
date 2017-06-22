@@ -20,7 +20,7 @@
 
 #include <stddef.h>
 
-#define GET_FILE_ID (*file)->f_inode->i_ino
+#define GET_FILE_ID file->f_inode->i_ino
 #define UNINITIALIZED -1
 
 typedef struct MessageBuffer {
@@ -43,11 +43,11 @@ typedef struct MessageNode {
 	struct MessageNode * nextNode;
 } MessageNode;
 
-void initMessageNode(MessageNode mNode)
+void initMessageNode(MessageNode * mNode)
 {
-	mNode.nextNode = NULL;
-	mNode.deviceFileId = UNINITIALIZED;
-	initMessageSlot(&(mNode.messageSlot));
+	(*mNode).nextNode = NULL;
+	(*mNode).deviceFileId = UNINITIALIZED;
+	initMessageSlot(&((*mNode).messageSlot));
 }
 
 
@@ -57,9 +57,9 @@ static MessageNode * head = NULL;
 /*
  * get node pointer by asssociated unique device file id
  */
-MessageNode * getNode(int deviceFileId) {
+MessageNode * getNode(int deviceFileId, MessageNode *newNodeP) {
 	MessageNode currentNode = *head;
-	if(currentNode == NULL)
+	if(head == NULL)
 	{
 		return NULL;
 	}
@@ -70,7 +70,8 @@ MessageNode * getNode(int deviceFileId) {
 
 		currentNode = *(currentNode.nextNode);
 	}
-	return &currentNode;
+	(*newNodeP) = currentNode;
+	return newNodeP;
 }
 
 /*******************FROM RECITATION: ***********************************/
@@ -89,6 +90,7 @@ static struct chardev_info device_info;
 /* process attempts to open the device file */
 static int device_open(struct inode *inode, struct file *file) {
 	unsigned long flags; // for spinlock
+	MessageNode *newNodeP;
 	printk("device_open(%p)\n", file);
 
 	/*
@@ -102,18 +104,19 @@ static int device_open(struct inode *inode, struct file *file) {
 	dev_open_flag++;
 
 	// ACTIONS:
-	if ( *(getNode(GET_FILE_ID)) == NULL)
+
+	if ( (getNode(GET_FILE_ID, newNodeP)) == NULL)
 	{
 		if (head == NULL) {
 			head = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
 			initMessageNode(head); // init first! then set file id
-			(*head)->deviceFileId = GET_FILE_ID;
+			head->deviceFileId = GET_FILE_ID;
 		}
 		else
 		{
 			MessageNode *newNode = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
 			initMessageNode(newNode);
-			(*newNode)->deviceFileId = GET_FILE_ID;
+			newNode->deviceFileId = GET_FILE_ID;
 			(*newNode).nextNode = head;
 			head = newNode;
 		}
@@ -126,6 +129,8 @@ static int device_open(struct inode *inode, struct file *file) {
 
 static int device_release(struct inode *inode, struct file *file) {
 	unsigned long flags; // for spinlock
+	MessageNode currentNode = *head;
+	MessageNode prevNode;
 	printk("device_release(%p,%p)\n", inode, file);
 
 	/* ready for our next caller */
@@ -134,15 +139,13 @@ static int device_release(struct inode *inode, struct file *file) {
 
 
 	// release memory:
-	MessageNode currentNode = *head;
-	MessageNode prevNode;
 
 
 	// not handling nulls here because a struct with file id HAS to exist
-	if ((*head)->deviceFileId == GET_FILE_ID)
+	if (head->deviceFileId == GET_FILE_ID)
 	{
 		currentNode = *(head->nextNode);
-		free(head);
+		kfree(head);
 		head = &currentNode;
 	}
 	else
@@ -156,7 +159,7 @@ static int device_release(struct inode *inode, struct file *file) {
 		}
 
 		prevNode.nextNode = currentNode.nextNode;
-		free(currentNode); // TODO am I doing this right?
+		kfree(&currentNode); // TODO am I doing this right?
 	}
 
 
@@ -171,16 +174,16 @@ static int device_release(struct inode *inode, struct file *file) {
  the device file attempts to read from it */
 static ssize_t device_read(struct file *file, char * buffer, size_t length,
 		loff_t * offset) {
+	int i;
 
 	// TODO check user space buffer?
-
-	MessageNode mNode = *(getNode(GET_FILE_ID));
+	MessageNode *newNodeP = NULL;
+	MessageNode mNode = *(getNode(GET_FILE_ID, newNodeP));
 	if (mNode.messageSlot.currentChannelIndex == UNINITIALIZED) {
 		printk("Tried to read but channel index uninitialized\n");
 		return -1;
 	}
 
-	int i;
 	for (i = 0; i < length && i < MESSAGE_BUFFER_LENGTH; i++) {
 		put_user(mNode.messageSlot.messageBufferlArray[mNode.messageSlot.currentChannelIndex].message[i], buffer + i);
 	}
@@ -191,10 +194,11 @@ static ssize_t device_read(struct file *file, char * buffer, size_t length,
 /* somebody tries to write into our device file */
 static ssize_t device_write(struct file *file, const char * buffer,
 		size_t length, loff_t * offset) {
+	int i;
 
 	// TODO check user space buffer?
-
-	MessageNode mNode = *(getNode(GET_FILE_ID));
+	MessageNode *newNodeP = NULL;
+	MessageNode mNode = *(getNode(GET_FILE_ID, newNodeP));
 	if (mNode.messageSlot.currentChannelIndex == UNINITIALIZED) {
 		printk("Tried to read but channel index uninitialized\n");
 		return -1;
@@ -203,7 +207,6 @@ static ssize_t device_write(struct file *file, const char * buffer,
 
 	printk("device_write(%p,%d)\n", file, length);
 
-	int i;
 	for (i = 0; i < MESSAGE_BUFFER_LENGTH; i++) {
 		if (i < length)
 		{
@@ -234,16 +237,16 @@ static long device_ioctl( //struct inode*  inode,
 
 
 
+	MessageNode *newNodeP = NULL;
+	MessageNode mNode = *(getNode(GET_FILE_ID, newNodeP));
 	// TODO check correct command received? ? ? ? ?
 
 
 
 	if (ioctl_param > 3 || ioctl_param < 0) {
-		printf("Wrong ioctl argument. channel index invalid\n");
+		printk("Wrong ioctl argument. channel index invalid\n");
 		return -1;
 	}
-
-	MessageNode mNode = *(getNode(GET_FILE_ID));
 	mNode.messageSlot.currentChannelIndex = ioctl_param;
 
 	return SUCCESS;
