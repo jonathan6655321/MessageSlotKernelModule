@@ -9,7 +9,6 @@
 #undef MODULE
 #define MODULE
 
-
 #include "message_slot.h"
 
 #include <linux/kernel.h>
@@ -17,51 +16,69 @@
 #include <linux/fs.h>
 #include <asm/uaccess.h>
 #include <linux/string.h>
+#include <linux/slab.h>
 
+#include <stddef.h>
 
+#define GET_FILE_ID (*file)->f_inode->i_ino
+#define UNINITIALIZED -1
 
 typedef struct MessageBuffer {
 	char message[MESSAGE_BUFFER_LENGTH];
 } MessageBuffer;
 
 typedef struct MessageSlot {
-	MessageBuffer messageChannelArray[NUM_CHANNELS]; // needs to be initialized to hold 128 byte buffers
-	int currentChannelIndex = -1; // valid indeces: 0-3
+	MessageBuffer messageBufferlArray[NUM_CHANNELS]; // needs to be initialized to hold 128 byte buffers
+	int currentChannelIndex; // valid indeces: 0-3
 } MessageSlot;
+
+void initMessageSlot(MessageSlot *ms)
+{
+	(*ms).currentChannelIndex = UNINITIALIZED;
+}
 
 typedef struct MessageNode {
 	int deviceFileId;
 	MessageSlot messageSlot;
-	struct MessageNode * nextNode = NULL;
+	struct MessageNode * nextNode;
 } MessageNode;
+
+void initMessageNode(MessageNode mNode)
+{
+	mNode.nextNode = NULL;
+	mNode.deviceFileId = UNINITIALIZED;
+	initMessageSlot(&(mNode.messageSlot));
+}
+
 
 static MessageNode * head = NULL;
 
-MessageNode * getNode(int deviceFileId)
-{
-	MessageNode currentNode = head;
-	while(currentNode.deviceFileId != deviceFileId)
+
+/*
+ * get node pointer by asssociated unique device file id
+ */
+MessageNode * getNode(int deviceFileId) {
+	MessageNode currentNode = *head;
+	if(currentNode == NULL)
 	{
-		if (currentNode.nextNode == NULL)
-		{
+		return NULL;
+	}
+	while (currentNode.deviceFileId != deviceFileId) {
+		if (currentNode.nextNode == NULL) {
 			return NULL;
 		}
 
 		currentNode = *(currentNode.nextNode);
 	}
-	return currentNode;
+	return &currentNode;
 }
-
-
-
-
 
 /*******************FROM RECITATION: ***********************************/
 
 MODULE_LICENSE("GPL");
 
-struct chardev_info{
-    spinlock_t lock;
+struct chardev_info {
+	spinlock_t lock;
 };
 
 static int dev_open_flag = 0; /* used to prevent concurent access into the same device */
@@ -70,89 +87,144 @@ static struct chardev_info device_info;
 /***************** char device functions *********************/
 
 /* process attempts to open the device file */
-static int device_open(struct inode *inode, struct file *file)
-{
-    unsigned long flags; // for spinlock
-    printk("device_open(%p)\n", file);
+static int device_open(struct inode *inode, struct file *file) {
+	unsigned long flags; // for spinlock
+	printk("device_open(%p)\n", file);
 
-    /*
-     * We don't want to talk to two processes at the same time
-     */
-    spin_lock_irqsave(&device_info.lock, flags);
-    if (dev_open_flag){
-        spin_unlock_irqrestore(&device_info.lock, flags);
-        return -EBUSY;
-    }
-    dev_open_flag++;
+	/*
+	 * We don't want to talk to two processes at the same time
+	 */
+	spin_lock_irqsave(&device_info.lock, flags);
+	if (dev_open_flag) {
+		spin_unlock_irqrestore(&device_info.lock, flags);
+		return -EBUSY;
+	}
+	dev_open_flag++;
 
+	// ACTIONS:
+	if ( *(getNode(GET_FILE_ID)) == NULL)
+	{
+		if (head == NULL) {
+			head = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
+			initMessageNode(head); // init first! then set file id
+			(*head)->deviceFileId = GET_FILE_ID;
+		}
+		else
+		{
+			MessageNode *newNode = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
+			initMessageNode(newNode);
+			(*newNode)->deviceFileId = GET_FILE_ID;
+			(*newNode).nextNode = head;
+			head = newNode;
+		}
+	}
 
-    // ACTIONS:
-    if (head == NULL)
-    {
-    	head = kmalloc(sizeof(MessageNode), GFP_KERNEL);
-    	head->deviceFileId = (*file)->f_inode->i_ino;
-    }
+	spin_unlock_irqrestore(&device_info.lock, flags);
 
-
-
-    spin_unlock_irqrestore(&device_info.lock, flags);
-
-    return SUCCESS;
+	return SUCCESS;
 }
 
-static int device_release(struct inode *inode, struct file *file)
-{
-    unsigned long flags; // for spinlock
-    printk("device_release(%p,%p)\n", inode, file);
+static int device_release(struct inode *inode, struct file *file) {
+	unsigned long flags; // for spinlock
+	printk("device_release(%p,%p)\n", inode, file);
 
-    /* ready for our next caller */
-    spin_lock_irqsave(&device_info.lock, flags);
-    dev_open_flag--;
-    spin_unlock_irqrestore(&device_info.lock, flags);
+	/* ready for our next caller */
+	spin_lock_irqsave(&device_info.lock, flags);
+	dev_open_flag--;
 
-    return SUCCESS;
+
+	// release memory:
+	MessageNode currentNode = *head;
+	MessageNode prevNode;
+
+
+	// not handling nulls here because a struct with file id HAS to exist
+	if ((*head)->deviceFileId == GET_FILE_ID)
+	{
+		currentNode = *(head->nextNode);
+		free(head);
+		head = &currentNode;
+	}
+	else
+	{
+		prevNode = currentNode;
+		currentNode = *(currentNode.nextNode);
+		while (currentNode.deviceFileId != GET_FILE_ID)
+		{
+			prevNode = currentNode;
+			currentNode = *(currentNode.nextNode);
+		}
+
+		prevNode.nextNode = currentNode.nextNode;
+		free(currentNode); // TODO am I doing this right?
+	}
+
+
+
+
+	spin_unlock_irqrestore(&device_info.lock, flags);
+
+	return SUCCESS;
 }
 
 /* a process which has already opened
-   the device file attempts to read from it */
-static ssize_t device_read(struct file *file, char __user * buffer, size_t length, loff_t * offset)
-{
+ the device file attempts to read from it */
+static ssize_t device_read(struct file *file, char * buffer, size_t length,
+		loff_t * offset) {
 
 	// TODO check user space buffer?
 
+	MessageNode mNode = *(getNode(GET_FILE_ID));
+	if (mNode.messageSlot.currentChannelIndex == UNINITIALIZED) {
+		printk("Tried to read but channel index uninitialized\n");
+		return -1;
+	}
 
+	int i;
+	for (i = 0; i < length && i < MESSAGE_BUFFER_LENGTH; i++) {
+		put_user(mNode.messageSlot.messageBufferlArray[mNode.messageSlot.currentChannelIndex].message[i], buffer + i);
+	}
 
-
-
-    return ; // invalid argument error
+	return i; // invalid argument error
 }
 
-
 /* somebody tries to write into our device file */
-static ssize_t
-device_write(struct file *file,
-         const char __user * buffer, size_t length, loff_t * offset)
-{
-  int i;
-  printk("device_write(%p,%d)\n", file, length);
-  for (i = 0; i < length && i < BUF_LEN; i++)
-  {
-    get_user(Message[i], buffer + i);
-		if(1 == encryption_flag)
-      Message[i] += 1;
-  }
+static ssize_t device_write(struct file *file, const char * buffer,
+		size_t length, loff_t * offset) {
 
-  /* return the number of input characters used */
-  return i;
+	// TODO check user space buffer?
+
+	MessageNode mNode = *(getNode(GET_FILE_ID));
+	if (mNode.messageSlot.currentChannelIndex == UNINITIALIZED) {
+		printk("Tried to read but channel index uninitialized\n");
+		return -1;
+	}
+
+
+	printk("device_write(%p,%d)\n", file, length);
+
+	int i;
+	for (i = 0; i < MESSAGE_BUFFER_LENGTH; i++) {
+		if (i < length)
+		{
+			get_user(mNode.messageSlot.messageBufferlArray[mNode.messageSlot.currentChannelIndex].message[i], buffer + i);
+		}
+		else
+		{
+			mNode.messageSlot.messageBufferlArray[mNode.messageSlot.currentChannelIndex].message[i] = '\0'; // TODO what do they mean by zero?
+		}
+	}
+
+	/* return the number of input characters used */
+	return i;
 }
 
 // this supports changing the current channel index TODO I WROTE THIS!
 static long device_ioctl( //struct inode*  inode,
-                  struct file*   file,
-                  unsigned int   ioctl_num,/* The number of the ioctl */
-                  unsigned long  ioctl_param) /* The parameter to it */
+		struct file* file, unsigned int ioctl_num,/* The number of the ioctl */
+		unsigned long ioctl_param) /* The parameter to it */
 {
-  /* Switch according to the ioctl called */
+	/* Switch according to the ioctl called */
 //  if(IOCTL_SET_ENC == ioctl_num)
 //	{
 //    /* Get the parameter given to ioctl by the process */
@@ -160,20 +232,21 @@ static long device_ioctl( //struct inode*  inode,
 //    encryption_flag = ioctl_param;
 //  }
 
+
+
 	// TODO check correct command received? ? ? ? ?
 
-	if (ioctl_param > 3 || ioctl_param < 0)
-	{
+
+
+	if (ioctl_param > 3 || ioctl_param < 0) {
 		printf("Wrong ioctl argument. channel index invalid\n");
 		return -1;
 	}
 
-	MessageNode mNode = getNode((*file)->f_inode->i_ino);
+	MessageNode mNode = *(getNode(GET_FILE_ID));
 	mNode.messageSlot.currentChannelIndex = ioctl_param;
 
-
-
-  return SUCCESS;
+	return SUCCESS;
 }
 
 /************** Module Declarations *****************/
@@ -181,54 +254,50 @@ static long device_ioctl( //struct inode*  inode,
 /* This structure will hold the functions to be called
  * when a process does something to the device we created */
 
-struct file_operations Fops = {
-    .read = device_read,
-    .write = device_write,
-    .unlocked_ioctl= device_ioctl,
-    .open = device_open,
-    .release = device_release,
-};
+struct file_operations Fops = { .read = device_read, .write = device_write,
+		.unlocked_ioctl = device_ioctl, .open = device_open, .release =
+				device_release, };
 
 /* Called when module is loaded.
  * Initialize the module - Register the character device */
-static int __init simple_init(void)
+static int simple_init(void)
 {
-		unsigned int rc = 0;
-    /* init dev struct*/
-    memset(&device_info, 0, sizeof(struct chardev_info));
-    spin_lock_init(&device_info.lock);
+	unsigned int rc = 0;
+	/* init dev struct*/
+	memset(&device_info, 0, sizeof(struct chardev_info));
+	spin_lock_init(&device_info.lock);
 
-    /* Register a character device. Get newly assigned major num */
-    rc = register_chrdev(MAJOR_NUM, DEVICE_RANGE_NAME, &Fops /* our own file operations struct */);
+	/* Register a character device. Get newly assigned major num */
+	rc = register_chrdev(MAJOR_NUM, DEVICE_RANGE_NAME, &Fops /* our own file operations struct */);
 
-    /*
-     * Negative values signify an error
-     */
-    if (rc < 0) {
-        printk(KERN_ALERT "%s failed with %d\n",
-               "Sorry, registering the character device ", MAJOR_NUM);
-        return -1;
-    }
+	/*
+	 * Negative values signify an error
+	 */
+	if (rc < 0)
+	{
+		printk("Error: could not register module\n");
+		return -1;
+	}
 
-    printk("Registeration is a success. The major device number is %d.\n", MAJOR_NUM);
-    printk("If you want to talk to the device driver,\n");
-    printk("you have to create a device file:\n");
-    printk("mknod /dev/%s c %d 0\n", DEVICE_FILE_NAME, MAJOR_NUM);
-    printk("You can echo/cat to/from the device file.\n");
-    printk("Dont forget to rm the device file and rmmod when you're done\n");
+	printk("Registeration is a success. The major device number is %d.\n", MAJOR_NUM);
+	printk("If you want to talk to the device driver,\n");
+	printk("you have to create a device file:\n");
+	printk("mknod /dev/%s c %d 0\n", DEVICE_FILE_NAME, MAJOR_NUM);
+	printk("You can echo/cat to/from the device file.\n");
+	printk("Dont forget to rm the device file and rmmod when you're done\n");
 
-    return 0;
+	return 0;
 }
 
 /* Cleanup - unregister the appropriate file from /proc */
-static void __exit simple_cleanup(void)
+static void simple_cleanup(void)
 {
-    /*
-     * Unregister the device
-     * should always succeed (didnt used to in older kernel versions)
-     */
-    unregister_chrdev(MAJOR_NUM, DEVICE_RANGE_NAME);
+	/*
+	 * Unregister the device
+	 * should always succeed (didnt used to in older kernel versions)
+	 */
+	unregister_chrdev(MAJOR_NUM, DEVICE_RANGE_NAME);
 }
 
-module_init(simple_init);
-module_exit(simple_cleanup);
+module_init( simple_init);
+module_exit( simple_cleanup);
