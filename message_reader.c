@@ -16,7 +16,8 @@
 
 int main(int argc, char **argv) {
 
-	int channelIndex = argv[1];
+	int channelIndex;
+	sscanf(argv[1], "%d", &channelIndex);
 	if (channelIndex > NUM_CHANNELS - 1 || channelIndex < 0) {
 		printf("Error: wrong channel index argument");
 		return -1;
@@ -34,7 +35,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
-	ret_val = ioctl(file_desc, IOCTL_SET_ENC, *channelIndex);
+	ret_val = ioctl(file_desc, IOCTL_SET_ENC, channelIndex);
 
 	if (ret_val < 0) {
 		printf("ioctl_set_msg failed:%d\n", ret_val);

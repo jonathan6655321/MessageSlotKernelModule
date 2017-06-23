@@ -12,16 +12,19 @@
 #include <sys/ioctl.h>  /* ioctl */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main(int argc, char **argv) {
 
-	int channelIndex = argv[1];
+	int channelIndex;
+	sscanf(argv[1], "%d", &channelIndex);
 	if (channelIndex > NUM_CHANNELS - 1 || channelIndex < 0) {
 		printf("Error: wrong channel index argument");
 		return -1;
 	}
 
-	char message[MESSAGE_BUFFER_LENGTH] = argv[2];
+	char message[MESSAGE_BUFFER_LENGTH];
+	strncpy(message, argv[2], MESSAGE_BUFFER_LENGTH);
 
 
 
@@ -34,7 +37,7 @@ int main(int argc, char **argv) {
 		exit(-1);
 	}
 
-	ret_val = ioctl(file_desc, IOCTL_SET_ENC, *channelIndex);
+	ret_val = ioctl(file_desc, IOCTL_SET_ENC, channelIndex);
 
 	if (ret_val < 0) {
 		printf("ioctl_set_msg failed:%d\n", ret_val);
