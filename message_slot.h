@@ -29,7 +29,7 @@
 #define IOCTL_SET_ENC _IOW(MAJOR_NUM, 0, unsigned long)
 
 #define DEVICE_RANGE_NAME "message_slot"
-#define DEVICE_FILE_NAME "message_slot_file"
+#define DEVICE_FILE_NAME "message_slot"
 
 
 //// FROM CHARDEV.H: ^^^^^^^^^^^^^^^

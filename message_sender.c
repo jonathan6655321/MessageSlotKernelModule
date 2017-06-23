@@ -12,6 +12,7 @@
 #include <sys/ioctl.h>  /* ioctl */
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 
 int main(int argc, char **argv) {
@@ -32,8 +33,8 @@ int main(int argc, char **argv) {
 
 	file_desc = open("/dev/"DEVICE_FILE_NAME, 0);
 	if (file_desc < 0) {
-		printf("Can't open device file: %s\n",
-		DEVICE_FILE_NAME);
+		printf("Can't open device file: %s %s\n",
+		DEVICE_FILE_NAME,strerror(errno));
 		exit(-1);
 	}
 
