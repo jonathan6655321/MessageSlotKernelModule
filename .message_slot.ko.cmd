@@ -1,0 +1,1 @@
+cmd_/media/sf_OS/Ex5/MessageSlotKernelModule/message_slot.ko := ld -r -m elf_i386 -T ./scripts/module-common.lds --build-id  -o /media/sf_OS/Ex5/MessageSlotKernelModule/message_slot.ko /media/sf_OS/Ex5/MessageSlotKernelModule/message_slot.o /media/sf_OS/Ex5/MessageSlotKernelModule/message_slot.mod.o

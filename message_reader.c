@@ -13,6 +13,8 @@
 #include <sys/ioctl.h>  /* ioctl */
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <string.h>
 
 int main(int argc, char **argv) {
 
@@ -28,29 +30,30 @@ int main(int argc, char **argv) {
 
 	int file_desc, ret_val;
 
-	file_desc = open("/dev/"DEVICE_FILE_NAME, 0);
+	file_desc = open("/dev/"DEVICE_FILE_NAME, O_RDWR, 0666);
 	if (file_desc < 0) {
 		printf("Can't open device file: %s\n",
 		DEVICE_FILE_NAME);
-		exit(-1);
+		return -1;
 	}
+
 
 	ret_val = ioctl(file_desc, IOCTL_SET_ENC, channelIndex);
 
 	if (ret_val < 0) {
 		printf("ioctl_set_msg failed:%d\n", ret_val);
-		exit(-1);
+		return -1;
 	}
 
 	ret_val = read(file_desc, message, MESSAGE_BUFFER_LENGTH);
 	if (ret_val < 0) {
-			printf("write failed:%d\n", ret_val);
-			exit(-1);
+			printf("read failed:%d %s\n", ret_val, strerror(errno));
+			return -1;
 		}
 
 	close(file_desc);
 
-	printf("read message: \n%s\n\n from channel number: %d", message, channelIndex);
+	printf("read message: \n%s\n\n from channel number: %d\n", message, channelIndex);
 	return 0;
 
 }

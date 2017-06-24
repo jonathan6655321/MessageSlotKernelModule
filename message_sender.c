@@ -26,34 +26,35 @@ int main(int argc, char **argv) {
 
 	char message[MESSAGE_BUFFER_LENGTH];
 	strncpy(message, argv[2], MESSAGE_BUFFER_LENGTH);
-
-
+	printf("the message to write is: %s\n", message);
 
 	int file_desc, ret_val;
 
-	file_desc = open("/dev/"DEVICE_FILE_NAME, 0);
+	file_desc = open("/dev/"DEVICE_FILE_NAME, O_RDWR, 0666);
 	if (file_desc < 0) {
 		printf("Can't open device file: %s %s\n",
 		DEVICE_FILE_NAME,strerror(errno));
-		exit(-1);
+		return -1;
 	}
 
 	ret_val = ioctl(file_desc, IOCTL_SET_ENC, channelIndex);
 
 	if (ret_val < 0) {
 		printf("ioctl_set_msg failed:%d\n", ret_val);
-		exit(-1);
+		return -1;
 	}
+
+
 
 	ret_val = write(file_desc, message, MESSAGE_BUFFER_LENGTH);
 	if (ret_val < 0) {
-			printf("write failed:%d\n", ret_val);
-			exit(-1);
+			printf("write failed:%d %s\n", ret_val, strerror(errno));
+			return -1;
 		}
 
 	close(file_desc);
 
-	printf("Wrote message %s to channel number: %d", message, channelIndex);
+	printf("Wrote message %s to channel number: %d\n", message, channelIndex);
 	return 0;
 
 }

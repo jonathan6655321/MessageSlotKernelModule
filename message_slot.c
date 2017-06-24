@@ -17,6 +17,7 @@
 #include <asm/uaccess.h>
 #include <linux/string.h>
 #include <linux/slab.h>
+#include<linux/init.h>
 
 #include <stddef.h>
 
@@ -51,27 +52,35 @@ void initMessageNode(MessageNode * mNode)
 }
 
 
-static MessageNode * head = NULL;
+static MessageNode * head;
 
 
 /*
  * get node pointer by asssociated unique device file id
  */
-MessageNode * getNode(int deviceFileId, MessageNode *newNodeP) {
-	MessageNode currentNode = *head;
+MessageNode * getNode(int deviceFileId, MessageNode **newNodeP) {
 	if(head == NULL)
 	{
 		return NULL;
 	}
-	while (currentNode.deviceFileId != deviceFileId) {
-		if (currentNode.nextNode == NULL) {
+	else
+	{
+		(*newNodeP) = head; // avoid dereferencing null
+	}
+	printk("************* head is not null\n");
+
+	while ((**newNodeP).deviceFileId != deviceFileId) {
+		printk("the current device file id: %d", (**newNodeP).deviceFileId);
+		if ((**newNodeP).nextNode == NULL) {
+			*newNodeP = NULL;
 			return NULL;
 		}
-
-		currentNode = *(currentNode.nextNode);
+		else
+		{
+			*newNodeP = (**newNodeP).nextNode;
+		}
 	}
-	(*newNodeP) = currentNode;
-	return newNodeP;
+	return *newNodeP;
 }
 
 /*******************FROM RECITATION: ***********************************/
@@ -105,22 +114,30 @@ static int device_open(struct inode *inode, struct file *file) {
 
 	// ACTIONS:
 
-	if ( (getNode(GET_FILE_ID, newNodeP)) == NULL)
+	printk(KERN_EMERG "************* 1\n");
+
+	if ((getNode(GET_FILE_ID, &newNodeP)) == NULL)
 	{
+		printk(KERN_EMERG "************* 2\n");
 		if (head == NULL) {
+			printk(KERN_EMERG "************* 3\n");
 			head = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
 			initMessageNode(head); // init first! then set file id
 			head->deviceFileId = GET_FILE_ID;
+			printk("a node was created with file id: %d\n", head->deviceFileId);
 		}
 		else
 		{
-			MessageNode *newNode = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
-			initMessageNode(newNode);
-			newNode->deviceFileId = GET_FILE_ID;
-			(*newNode).nextNode = head;
-			head = newNode;
+			printk(KERN_EMERG "************* 4\n");
+			newNodeP = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
+			initMessageNode(newNodeP);
+			newNodeP->deviceFileId = GET_FILE_ID;
+			(*newNodeP).nextNode = head;
+			head = newNodeP;
+			printk("a node was created with file id: %d\n", newNodeP->deviceFileId);
 		}
 	}
+
 
 	spin_unlock_irqrestore(&device_info.lock, flags);
 
@@ -129,8 +146,8 @@ static int device_open(struct inode *inode, struct file *file) {
 
 static int device_release(struct inode *inode, struct file *file) {
 	unsigned long flags; // for spinlock
-	MessageNode currentNode = *head;
-	MessageNode prevNode;
+//	MessageNode currentNode;
+//	MessageNode prevNode;
 	printk("device_release(%p,%p)\n", inode, file);
 
 	/* ready for our next caller */
@@ -142,25 +159,26 @@ static int device_release(struct inode *inode, struct file *file) {
 
 
 	// not handling nulls here because a struct with file id HAS to exist
-	if (head->deviceFileId == GET_FILE_ID)
-	{
-		currentNode = *(head->nextNode);
-		kfree(head);
-		head = &currentNode;
-	}
-	else
-	{
-		prevNode = currentNode;
-		currentNode = *(currentNode.nextNode);
-		while (currentNode.deviceFileId != GET_FILE_ID)
-		{
-			prevNode = currentNode;
-			currentNode = *(currentNode.nextNode);
-		}
-
-		prevNode.nextNode = currentNode.nextNode;
-		kfree(&currentNode); // TODO am I doing this right?
-	}
+//	currentNode = *head;
+//	if (head->deviceFileId == GET_FILE_ID)
+//	{
+//		currentNode = *(head->nextNode);
+//		kfree(head);
+//		head = &currentNode;
+//	}
+//	else
+//	{
+//		prevNode = currentNode;
+//		currentNode = *(currentNode.nextNode);
+//		while (currentNode.deviceFileId != GET_FILE_ID)
+//		{
+//			prevNode = currentNode;
+//			currentNode = *(currentNode.nextNode);
+//		}
+//
+//		prevNode.nextNode = currentNode.nextNode;
+//		kfree(&currentNode); // TODO am I doing this right?
+//	}
 
 
 
@@ -178,7 +196,17 @@ static ssize_t device_read(struct file *file, char * buffer, size_t length,
 
 	// TODO check user space buffer?
 	MessageNode *newNodeP = NULL;
-	MessageNode mNode = *(getNode(GET_FILE_ID, newNodeP));
+	MessageNode mNode;
+	printk("in device read\n");
+	if (getNode(GET_FILE_ID, &newNodeP) == NULL)
+	{
+		printk("getNode failed to find node with file id: %ld", GET_FILE_ID);
+		return -1;
+	}
+	else
+	{
+		mNode = *newNodeP;
+	}
 	if (mNode.messageSlot.currentChannelIndex == UNINITIALIZED) {
 		printk("Tried to read but channel index uninitialized\n");
 		return -1;
@@ -198,23 +226,29 @@ static ssize_t device_write(struct file *file, const char * buffer,
 
 	// TODO check user space buffer?
 	MessageNode *newNodeP = NULL;
-	MessageNode mNode = *(getNode(GET_FILE_ID, newNodeP));
-	if (mNode.messageSlot.currentChannelIndex == UNINITIALIZED) {
-		printk("Tried to read but channel index uninitialized\n");
+	printk("device_write \n");
+	if(getNode(GET_FILE_ID, &newNodeP) == NULL)
+	{
+		printk("could not find node in write\n");
+		return -1;
+	}
+
+	if ((*newNodeP).messageSlot.currentChannelIndex == UNINITIALIZED) {
+		printk("Tried to write but channel index uninitialized\n");
 		return -1;
 	}
 
 
-	printk("device_write(%p,%d)\n", file, length);
 
 	for (i = 0; i < MESSAGE_BUFFER_LENGTH; i++) {
+		printk("current char is: %c \n", *(buffer+i));
 		if (i < length)
 		{
-			get_user(mNode.messageSlot.messageBufferlArray[mNode.messageSlot.currentChannelIndex].message[i], buffer + i);
+			get_user((*newNodeP).messageSlot.messageBufferlArray[(*newNodeP).messageSlot.currentChannelIndex].message[i], buffer + i);
 		}
 		else
 		{
-			mNode.messageSlot.messageBufferlArray[mNode.messageSlot.currentChannelIndex].message[i] = '\0'; // TODO what do they mean by zero?
+			(*newNodeP).messageSlot.messageBufferlArray[(*newNodeP).messageSlot.currentChannelIndex].message[i] = '\0'; // TODO what do they mean by zero?
 		}
 	}
 
@@ -238,16 +272,16 @@ static long device_ioctl( //struct inode*  inode,
 
 
 	MessageNode *newNodeP = NULL;
-	MessageNode mNode = *(getNode(GET_FILE_ID, newNodeP));
+	getNode(GET_FILE_ID, &newNodeP);
 	// TODO check correct command received? ? ? ? ?
-
+	printk("in ioctl, the param is %ld\n", ioctl_param);
 
 
 	if (ioctl_param > 3 || ioctl_param < 0) {
 		printk("Wrong ioctl argument. channel index invalid\n");
 		return -1;
 	}
-	mNode.messageSlot.currentChannelIndex = ioctl_param;
+	(*newNodeP).messageSlot.currentChannelIndex = ioctl_param;
 
 	return SUCCESS;
 }
@@ -266,6 +300,7 @@ struct file_operations Fops = { .read = device_read, .write = device_write,
 static int simple_init(void)
 {
 	unsigned int rc = 0;
+	printk(KERN_EMERG "in init\n");
 	/* init dev struct*/
 	memset(&device_info, 0, sizeof(struct chardev_info));
 	spin_lock_init(&device_info.lock);
@@ -281,6 +316,9 @@ static int simple_init(void)
 		printk("Error: could not register module\n");
 		return -1;
 	}
+
+	// init vars:
+	head = NULL;
 
 	printk("Registeration is a success. The major device number is %d.\n", MAJOR_NUM);
 	printk("If you want to talk to the device driver,\n");
