@@ -30,11 +30,26 @@ int main(int argc, char **argv) {
 
 	int file_desc, ret_val;
 
-	file_desc = open("/dev/"DEVICE_FILE_NAME, O_RDWR, 0666);
-	if (file_desc < 0) {
-		printf("Can't open device file: %s\n",
-		DEVICE_FILE_NAME);
-		return -1;
+	// if you want multiple files, add path as arg 3
+	if (argc == 3)
+	{
+		char devicePath[250] = "/dev/";
+		strcat(devicePath, argv[2]);
+		file_desc = open(devicePath, O_RDWR, 0666);
+			if (file_desc < 0) {
+				printf("Can't open device file: %s %s\n",
+				devicePath,strerror(errno));
+				return -1;
+			}
+	}
+	else
+	{
+		file_desc = open("/dev/"DEVICE_FILE_NAME, O_RDWR, 0666);
+		if (file_desc < 0) {
+			printf("Can't open device file: %s %s\n",
+			DEVICE_FILE_NAME,strerror(errno));
+			return -1;
+		}
 	}
 
 
