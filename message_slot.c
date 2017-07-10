@@ -67,10 +67,8 @@ MessageNode * getNode(int deviceFileId, MessageNode **newNodeP) {
 	{
 		(*newNodeP) = head; // avoid dereferencing null
 	}
-	printk("************* head is not null\n");
 
 	while ((**newNodeP).deviceFileId != deviceFileId) {
-		printk("the current device file id: %d", (**newNodeP).deviceFileId);
 		if ((**newNodeP).nextNode == NULL) {
 			*newNodeP = NULL;
 			return NULL;
@@ -100,7 +98,6 @@ static struct chardev_info device_info;
 static int device_open(struct inode *inode, struct file *file) {
 	unsigned long flags; // for spinlock
 	MessageNode *newNodeP;
-	printk("device_open(%p)\n", file);
 
 	/*
 	 * We don't want to talk to two processes at the same time
@@ -114,27 +111,21 @@ static int device_open(struct inode *inode, struct file *file) {
 
 	// ACTIONS:
 
-	printk(KERN_EMERG "************* 1\n");
 
 	if ((getNode(GET_FILE_ID, &newNodeP)) == NULL)
 	{
-		printk(KERN_EMERG "************* 2\n");
 		if (head == NULL) {
-			printk(KERN_EMERG "************* 3\n");
-			head = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
+			head = kmalloc(sizeof(MessageNode), GFP_KERNEL);
 			initMessageNode(head); // init first! then set file id
 			head->deviceFileId = GET_FILE_ID;
-			printk("a node was created with file id: %d\n", head->deviceFileId);
 		}
 		else
 		{
-			printk(KERN_EMERG "************* 4\n");
-			newNodeP = kmalloc(sizeof(MessageNode), GFP_KERNEL); // TODO check if failed?
+			newNodeP = kmalloc(sizeof(MessageNode), GFP_KERNEL);
 			initMessageNode(newNodeP);
 			newNodeP->deviceFileId = GET_FILE_ID;
 			(*newNodeP).nextNode = head;
 			head = newNodeP;
-			printk("a node was created with file id: %d\n", newNodeP->deviceFileId);
 		}
 	}
 
@@ -147,7 +138,7 @@ static int device_open(struct inode *inode, struct file *file) {
 static int device_release(struct inode *inode, struct file *file) {
 	unsigned long flags; // for spinlock
 
-	printk("device_release(%p,%p)\n", inode, file);
+//	printk("device_release(%p,%p)\n", inode, file);
 
 	/* ready for our next caller */
 	spin_lock_irqsave(&device_info.lock, flags);
@@ -164,7 +155,6 @@ static ssize_t device_read(struct file *file, char * buffer, size_t length,
 		loff_t * offset) {
 	int i;
 
-	// TODO check user space buffer?
 	MessageNode *newNodeP = NULL;
 	MessageNode mNode;
 	if (getNode(GET_FILE_ID, &newNodeP) == NULL)
@@ -193,7 +183,6 @@ static ssize_t device_write(struct file *file, const char * buffer,
 		size_t length, loff_t * offset) {
 	int i;
 
-	// TODO check user space buffer?
 	MessageNode *newNodeP = NULL;
 	if(getNode(GET_FILE_ID, &newNodeP) == NULL)
 	{
@@ -223,7 +212,7 @@ static ssize_t device_write(struct file *file, const char * buffer,
 	return i;
 }
 
-// this supports changing the current channel index TODO I WROTE THIS!
+// this supports changing the current channel index
 static long device_ioctl( //struct inode*  inode,
 		struct file* file, unsigned int ioctl_num,/* The number of the ioctl */
 		unsigned long ioctl_param) /* The parameter to it */
@@ -240,8 +229,6 @@ static long device_ioctl( //struct inode*  inode,
 
 	MessageNode *newNodeP = NULL;
 	getNode(GET_FILE_ID, &newNodeP);
-	// TODO check correct command received? ? ? ? ?
-	printk("in ioctl, the param is %ld\n", ioctl_param);
 
 
 	if (ioctl_param > 3 || ioctl_param < 0) {

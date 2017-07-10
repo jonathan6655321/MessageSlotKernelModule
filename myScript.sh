@@ -4,7 +4,6 @@ sudo rmmod message_slot
 sudo rm /dev/message_slot
 
 sudo make
-sudo make
 echo ++++++++++++++++++++ INSERTING MODULE +++++++++++++++
 sudo insmod message_slot.ko
 sudo mknod /dev/message_slot c 245 0
@@ -21,7 +20,7 @@ echo +++++++++++++++++ SENDING MESSAGE ++++++++++++++++++
 echo +++++++++++++++++++++++ READING MESSAGE ++++++++++++++++++
 ./message_reader 1
 echo +++++++++++++++++ SENDING MESSAGE ++++++++++++++++++
-./message_sender 2  chanel2HOMie!!!
+./message_sender 2  channel2HOMie!!!
 echo +++++++++++++++++++++++ READING MESSAGE ++++++++++++++++++
 ./message_reader 2
 #echo +++++++++++++++++ KERNEL LOG: +++++++++++++++++
